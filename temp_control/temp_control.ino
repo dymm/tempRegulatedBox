@@ -20,6 +20,7 @@
 #include <OneWire.h>
 #include <DS18B20.h>
 
+#define FAN_BUS 10
 #define ONE_WIRE_BUS 7
 
 OneWire oneWire(ONE_WIRE_BUS);
@@ -29,6 +30,8 @@ DS18B20 sensor(&oneWire);
 LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
 
 void setup() {
+  pinMode(FAN_BUS, OUTPUT);
+  digitalWrite(FAN_BUS, LOW);
   // set up the LCD's number of columns and rows:
   lcd.begin(16, 2);
   sensor.begin();
@@ -39,7 +42,9 @@ void loop() {
   while (!sensor.isConversionComplete());  // wait until sensor is ready
   
   lcd.clear();
-  printTemperature(sensor.getTempC());
+  float temp = sensor.getTempC();
+  printTemperature(temp);
+  driveFan(temp);
   
   delay(1000);
 }
@@ -51,4 +56,12 @@ void printTemperature(float temperature) {
   sprintf( buf2, "%s C", buf1);
   lcd.setCursor(0, 0);
   lcd.print(buf2);
+}
+
+void driveFan(float temperature) {
+  if(temperature > 24.0g) {
+    digitalWrite(FAN_BUS, HIGH);
+  } else {
+    digitalWrite(FAN_BUS, LOW);
+  }
 }
