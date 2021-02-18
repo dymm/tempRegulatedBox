@@ -1,0 +1,380 @@
+openapi: 3.0.1
+info:
+  title: Brewing box monitor
+  description: Brewing box monitor
+  contact:
+    email: mailto.dimitri@gmail.com
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  version: 1.0.0
+servers:
+  - url: https://brewing.box.monitor.io/v1
+tags:
+  - name: box
+    description: It's a brewing box
+  - name: probe
+    description: A probe mesure something.
+  - name: measureSuite
+    description: A collection of measure
+paths:
+  /box:
+    get:
+      tags:
+        - box
+      summary: Get all boxes
+      operationId: getAllBoxes
+      responses:
+        200:
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 100
+                items:
+                  $ref: "#/components/schemas/Box"
+        400:
+          description: Bad request. User ID must be an integer and larger than 0.
+        401:
+          $ref: "#/components/responses/UnauthorizedError"
+        403:
+          description: Authorization denied.
+        404:
+          description: A user with the specified ID was not found.
+        429:
+          description: Too many requests.
+        5XX:
+          description: Unexpected error.
+    put:
+      tags:
+        - box
+      summary: Update an existing box
+      operationId: updateBox
+      requestBody:
+        description: Box object that needs to be added to the store
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Box"
+        required: true
+      responses:
+        400:
+          description: Invalid ID supplied
+        401:
+          $ref: "#/components/responses/UnauthorizedError"
+        403:
+          description: Authorization denied.
+          content: {}
+        404:
+          description: Box not found
+          content: {}
+        405:
+          description: Validation exception
+          content: {}
+        429:
+          description: Too many requests.
+        5XX:
+          description: Unexpected error.
+      x-codegen-request-body-name: body
+    post:
+      tags:
+        - box
+      summary: Add a new box
+      operationId: addBox
+      requestBody:
+        description: Box description to add
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Box"
+        required: true
+      responses:
+        201:
+          description: Ok not no content
+          content: {}
+        401:
+          $ref: "#/components/responses/UnauthorizedError"
+        403:
+          description: Authorization denied.
+        404:
+          description: Box not found
+          content: {}
+        405:
+          description: Validation exception
+          content: {}
+        429:
+          description: Too many requests.
+        5XX:
+          description: Unexpected error.
+      x-codegen-request-body-name: body
+  /box/{boxId}/probe:
+    get:
+      tags:
+        - probe
+      summary: Get the avaliable probes list
+      operationId: getProbesFromBoxId
+      parameters:
+        - name: boxId
+          in: path
+          description: ID of box to return
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        200:
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Probe"
+        400:
+          description: Invalid ID supplied
+          content: {}
+        401:
+          $ref: "#/components/responses/UnauthorizedError"
+        403:
+          description: Authorization denied.
+        404:
+          description: Box not found
+          content: {}
+        405:
+          description: Validation exception
+          content: {}
+        429:
+          description: Too many requests.
+        5XX:
+          description: Unexpected error.
+  /box/{boxId}:
+    get:
+      tags:
+        - box
+      summary: Find box by ID
+      description: Returns a single box
+      operationId: getBoxById
+      parameters:
+        - name: boxId
+          in: path
+          description: ID of box to return
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+      responses:
+        200:
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Box"
+        401:
+          $ref: "#/components/responses/UnauthorizedError"
+        403:
+          description: Authorization denied.
+        404:
+          description: Box not found
+          content: {}
+        429:
+          description: Too many requests.
+        5XX:
+          description: Unexpected error.
+    post:
+      tags:
+        - box
+      summary: Updates a box in the store with form data
+      operationId: updateBoxWithForm
+      parameters:
+        - name: boxId
+          in: path
+          description: ID of box that needs to be updated
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              properties:
+                name:
+                  type: string
+                  description: Updated name of the box
+                  pattern: "^[a-zA-Z]{1}[0-9a-zA-Z]*$"
+                status:
+                  type: string
+                  description: Updated status of the box
+      responses:
+        201:
+          description: ok but no content
+        401:
+          $ref: "#/components/responses/UnauthorizedError"
+        403:
+          description: Authorization denied.
+        404:
+          description: Box not found
+          content: {}
+        405:
+          description: Validation exception
+          content: {}
+        429:
+          description: Too many requests.
+        5XX:
+          description: Unexpected error.
+    delete:
+      tags:
+        - box
+      summary: Deletes a box
+      operationId: deleteBox
+      parameters:
+        - name: boxId
+          in: path
+          description: Box id to delete
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        400:
+          description: Invalid ID supplied
+          content: {}
+        401:
+          $ref: "#/components/responses/UnauthorizedError"
+        403:
+          description: Authorization denied.
+        404:
+          description: Box not found
+          content: {}
+        429:
+          description: Too many requests.
+        5XX:
+          description: Unexpected error.
+  /box/{boxId}/probe/{probeId}/measure:
+    get:
+      tags:
+        - measureSuite
+      summary: Get the measures from a box probes
+      operationId: getMeasureSuiteFromBoxId
+      parameters:
+        - name: boxId
+          in: path
+          description: ID of box to return
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: probeId
+          in: path
+          description: ID of box to return
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: from
+          in: query
+          description: Date of the oldest measure
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          description: Date of the latest measure
+          schema:
+            type: string
+            format: date-time
+      responses:
+        200:
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeasureSuite"
+        401:
+          $ref: "#/components/responses/UnauthorizedError"
+        403:
+          description: Authorization denied.
+        404:
+          description: Box or probe not found
+          content: {}
+        429:
+          description: Too many requests.
+        5XX:
+          description: Unexpected error.
+components:
+  schemas:
+    Box:
+      required:
+        - name
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+          example: First
+        status:
+          type: string
+          description: pet status in the store
+          enum:
+            - on
+            - off
+            - unknown
+    Probe:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        type:
+          type: string
+          enum:
+            - Temperature
+            - Humidity
+            - HeaterSwitch
+            - HeaterFanSwitch
+        name:
+          type: string
+          example: First
+    MeasureSuite:
+      type: object
+      properties:
+        probeId:
+          type: integer
+          description: Id of the probe
+          format: int64
+          minimum: 0
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        measures:
+          type: array
+          maxItems: 1000
+          items:
+            $ref: "#/components/schemas/Measure"
+    Measure:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date-time
+        value:
+          type: number
+          format: float
+  responses:
+    UnauthorizedError:
+      description: Access token is missing or invalid
+  securitySchemes:
+    brewbox_auth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT # optional, arbitrary value for documentation purposes
+security:
+  - brewbox_auth: []
