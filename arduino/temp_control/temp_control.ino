@@ -38,9 +38,12 @@
 
 #define WITH_DS18B20
 #ifdef WITH_DS18B20
+#define NO_VALUE -999.0
 OneWire oneWire(ONE_WIRE_BUS);
 DS18B20 sensor(&oneWire);
+bool isExternalSensorInitialized;
 uint8_t isExternalSensorMeasuring;
+float previousTemperature;
 #endif
 
 #define WITH_AM232X
@@ -62,9 +65,7 @@ void setup() {
   lcd.print("Init...");
     
 #ifdef WITH_DS18B20
-  sensor.begin();
-  lcd.print("DS18B20 done...");
-  isExternalSensorMeasuring = 0;
+  initDS18B20();
 #endif  
   
 #ifdef WITH_AM232X
@@ -120,22 +121,43 @@ void printTime() {
 }
 
 #ifdef WITH_DS18B20
+void initDS18B20() {
+  isExternalSensorMeasuring = 0;
+  previousTemperature = NO_VALUE;  
+  isExternalSensorInitialized = sensor.begin();
+  if(isExternalSensorInitialized) {
+    sensor.setResolution(12);
+    sensor.setConfig(DS18B20_CRC);  // or 1
+  }    
+}
+
 float readAndPrintTemperature() {
+  if(!isExternalSensorInitialized) {
+    initDS18B20();
+    lcd.setCursor(0, 0);
+    lcd.print("HS");
+    return -999.0;
+  }
   if(isExternalSensorMeasuring == 0) {
     sensor.requestTemperatures();
   }
   isExternalSensorMeasuring++;
+
+  float temperature;
   if(!sensor.isConversionComplete()) {
     if(isExternalSensorMeasuring > 10) {
       lcd.setCursor(0, 0);
       lcd.print("Frozen...");
-      return -999.0;
     }
+    temperature = previousTemperature;
   } else {
-    isExternalSensorMeasuring = 0;    
+    isExternalSensorMeasuring = 0;
+    previousTemperature = temperature = sensor.getTempC();
+  }
+  if(temperature == DEVICE_CRC_ERROR || temperature == NO_VALUE) {
+    return;
   }
 
-  float temperature = sensor.getTempC();
   char buf1[16];
   char buf2[16];
   dtostrf(temperature, 4, 2, buf1);
