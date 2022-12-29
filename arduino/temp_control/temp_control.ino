@@ -1,7 +1,8 @@
 /*
    Temperature probe DS18B20 connected to PIN 7.
    The AM232X captor is connected to SDL and SDA pins.
-   The RTC clock is connected to the A4 : SDA and A5 : SCL.
+   The RTC clock is connected to the A4 -> SDA and A5 -> SCL.
+   ESP8266 ESP-01 Wifi module : PIN 9 (software Tx) with a voltage divider 220 and 390 ohm connected to the module Rx, and PIN 10 (software Rx) connected to the module Tx.
    The LCD 1602A is connected following those instructions :
    LCD RS pin to digital pin 12
    LCD Enable pin to digital pin 11
@@ -24,14 +25,11 @@
 #include <OneWire.h> //OneWire : https://www.pjrc.com/teensy/td_libs_OneWire.html
 #include <DS18B20.h>  //DS18B20_RT by Rob Tillaart : https://github.com/RobTillaart/DS18B20_RT
 
-// Fixed version from the forum. Don't know why github repo isn't up to date
-// https://forums.adafruit.com/viewtopic.php?t=188263&sid=043c32de72f66cba02d5ff6859908bc8&start=15
-// https://forums.adafruit.com/download/file.php?id=90538
-// https://forums.adafruit.com/download/file.php?id=90537
-// #include "AM2320/Adafruit_AM2320.h"
 #include <AM232X.h> // AM232X by Rob Tillaart : https://github.com/RobTillaart/AM232X
 
 #include <RTClib.h> //RTCLib by Adafruit : https://github.com/adafruit/RTClib
+
+#include <SoftwareSerial.h>
 
 #define FAN_BUS 10
 #define ONE_WIRE_BUS 7
@@ -56,30 +54,35 @@ uint8_t isTimeSet;
 // initialize the library with the numbers of the interface pins
 LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
 
+SoftwareSerial wifiSerial(10, 9);      // RX, TX for ESP8266
+bool DEBUG = true;   //show more logs
+int responseTime = 100; //communication timeout
+bool wifiConfigured = false;
+String moduleIp = "";
+
 void setup() {
   pinMode(FAN_BUS, OUTPUT);
   digitalWrite(FAN_BUS, LOW);
   // set up the LCD's number of columns and rows:
   lcd.begin(16, 2);
   lcd.setCursor(0, 0);
-  lcd.print("Init...");
+  lcd.print("Init");
     
 #ifdef WITH_DS18B20
   initDS18B20();
 #endif  
   
 #ifdef WITH_AM232X
-  if (!am2320.begin() )
+  while (!am2320.begin() )
   {
     lcd.setCursor(0, 0);
-    lcd.print("Wait AM2320 init");
-    while (1) delay(1000);
+    lcd.print("0");
+    delay(1000);
   }
-  lcd.print("am2320 wakeUp...");
+  lcd.clear(); lcd.setCursor(0, 0); lcd.print("1");
   am2320.wakeUp();
 #endif
   
-  lcd.print("rtc init........");
   rtc.begin();
   isTimeSet = rtc.isrunning();
   if (!isTimeSet) {
@@ -92,19 +95,17 @@ void setup() {
     // rtc.adjust(DateTime(2014, 1, 21, 3, 0, 0));
     lcd.print("rtc is not running........");
   }
+  lcd.clear(); lcd.setCursor(0, 0); lcd.print("2");
+
+   initWifi();
 }
 
 void loop() {
-  lcd.clear();
-  
-#ifdef WITH_DS18B20
-  float temperature = readAndPrintTemperature();
-  driveFan(temperature);
-#endif
-  printTime();
-#ifdef WITH_AM232X
-  readAndPrintValueFromAm2320();
-#endif
+  if(!wifiConfigured) {
+    handleWifiConfiguration();
+  } else {
+    doMeasures(); 
+  }
   delay(1000);
 }
 
@@ -146,6 +147,7 @@ float readAndPrintTemperature() {
   float temperature;
   if(!sensor.isConversionComplete()) {
     if(isExternalSensorMeasuring > 10) {
+      isExternalSensorMeasuring = 0;
       lcd.setCursor(0, 0);
       lcd.print("Frozen...");
     }
@@ -215,3 +217,169 @@ void readAndPrintValueFromAm2320() {
   #endif
 }
 #endif
+
+void doMeasures() {
+  lcd.clear();
+  
+#ifdef WITH_DS18B20
+  float temperature = readAndPrintTemperature();
+  driveFan(temperature);
+#endif
+  printTime();
+#ifdef WITH_AM232X
+  readAndPrintValueFromAm2320();
+#endif
+}
+
+/*
+* Name: readWifiSerialMessage
+* Description: Function used to read data from ESP8266 Serial.
+* Params: 
+* Returns: The response from the esp8266 (if there is a reponse)
+*/
+String  readWifiSerialMessage(){
+  char value[100]; 
+  int index_count =0;
+  while(wifiSerial.available()>0){
+    value[index_count]=wifiSerial.read();
+    index_count++;
+    value[index_count] = '\0'; // Null terminate the string
+  }
+  String str(value);
+  str.trim();
+  return str;
+}
+
+/*
+* Name: find
+* Description: Function used to match two string
+* Params: 
+* Returns: true if match else false
+*/
+boolean find(String string, String value){
+  if(string.indexOf(value)>=0)
+    return true;
+  return false;
+}
+
+/*
+* Name: sendToWifi
+* Description: Function used to send data to ESP8266.
+* Params: command - the data/command to send; timeout - the time to wait for a response; debug - print to Serial window?(true = yes, false = no)
+* Returns: The response from the esp8266 (if there is a reponse)
+*/
+String sendToWifi(String command, const int timeout, boolean debug){
+  if(debug)
+  {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print(command);
+    lcd.setCursor(0, 1);
+    lcd.print("?");
+    lcd.setCursor(0, 1);
+  }
+  String response = "";
+  wifiSerial.println(command); // send the read character to the esp8266
+  long int time = millis();
+  while( (time+timeout) > millis())
+  {
+    while(wifiSerial.available())
+    {
+    // The esp has data so display its output to the serial window 
+    char c = wifiSerial.read(); // read the next character.
+    response+=c;
+    }  
+  }
+  if(debug)
+  {
+    lcd.print(response.length() > 0 ? response : "done");
+  }
+  return response;
+}
+
+/*
+* Name: sendData
+* Description: Function used to send string to tcp client using cipsend
+* Params: 
+* Returns: void
+*/
+void sendData(String str){
+  String len="";
+  len+=str.length();
+  sendToWifi("AT+CIPSEND=0,"+len,responseTime,DEBUG);
+  delay(100);
+  sendToWifi(str,responseTime,DEBUG);
+  delay(100);
+  sendToWifi("AT+CIPCLOSE=5",responseTime,DEBUG);
+}
+
+void getIp() {
+  moduleIp = sendToWifi("AT+CIFSR",responseTime,DEBUG); // get ip address 
+  lcd.setCursor(0, 1);
+  lcd.print(moduleIp);
+}
+
+void getStatus() {
+  sendToWifi("AT+CIPSTATUS",responseTime,DEBUG); // get status
+}
+
+void initWifi() {
+  wifiSerial.begin(115200);
+  while (!wifiSerial) {
+    lcd.print("#");
+    delay(500); // wait for serial port to connect. Needed for Leonardo only
+  }
+
+  sendToWifi("AT+CIOBAUD=115200",responseTime,DEBUG);
+  //delay(5000);
+  sendToWifi("AT",responseTime,DEBUG);
+  delay(5000);
+  sendToWifi("AT+CIOBAUD?",responseTime,DEBUG);
+  delay(5000);
+  sendToWifi("AT+CWMODE=2",responseTime,DEBUG); // configure as access point
+  delay(5000);
+  sendToWifi("AT+CIPMUX=1",responseTime,DEBUG); // configure for multiple connections
+  delay(5000);
+  sendToWifi("AT+CIPSERVER=1,80",responseTime,DEBUG); // turn on server on port 80
+  delay(5000);
+  getIp();
+  //getStatus();
+}
+
+void parseAndExecuteConnection(String message) {
+  String ssidAndPass = message.substring(5,message.length());
+  String response = sendToWifi("AT+CWJAP=" + ssidAndPass,responseTime,DEBUG);
+  delay(1000);
+  getIp();
+}
+
+void executeWifiCommand() {
+  if(wifiSerial.available() <= 0) {
+    return;
+  }
+  
+  String message = readWifiSerialMessage();
+  
+  if(find(message,"esp8266:")){
+      String result = sendToWifi(message.substring(8,message.length()),responseTime,DEBUG);
+    if(find(result,"OK"))
+      sendData("\n"+result);
+    else
+      sendData("\nErrRead");               //At command ERROR CODE for Failed Executing statement
+  }else
+  if(find(message,"HELLO")){  //receives HELLO from wifi
+      sendData("\\nHI!");    //arduino says HI
+  }else if(find(message,"CONN:")){
+    //sending ph level:
+    parseAndExecuteConnection(message);
+  }
+  else{
+    sendData("\nErrRead");                 //Command ERROR CODE for UNABLE TO READ
+  }
+}
+
+void handleWifiConfiguration() {
+  executeWifiCommand();
+}
+
+
