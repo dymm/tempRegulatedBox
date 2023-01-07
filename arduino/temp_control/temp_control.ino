@@ -29,7 +29,7 @@
 
 #include <RTClib.h> //RTCLib by Adafruit : https://github.com/adafruit/RTClib
 
-#include <SoftwareSerial.h>
+//#include <SoftwareSerial.h>
 
 #define FAN_BUS 10
 #define ONE_WIRE_BUS 7
@@ -54,9 +54,16 @@ uint8_t isTimeSet;
 // initialize the library with the numbers of the interface pins
 LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
 
+//#define WIFI_BAUDRATE 9600
+//#define WIFI_BAUDRATE 57600
+#define WIFI_BAUDRATE 115200
+#ifdef SOFTWARE_SERIAL
 SoftwareSerial wifiSerial(10, 9);      // RX, TX for ESP8266
-bool DEBUG = true;   //show more logs
-int responseTime = 100; //communication timeout
+#else
+#define wifiSerial Serial
+#endif
+bool WIFI_DEBUG = true;   //show more logs
+int WIFI_TIMEOUT = 1000; //communication timeout
 bool wifiConfigured = false;
 String moduleIp = "";
 
@@ -231,44 +238,8 @@ void doMeasures() {
 #endif
 }
 
-/*
-* Name: readWifiSerialMessage
-* Description: Function used to read data from ESP8266 Serial.
-* Params: 
-* Returns: The response from the esp8266 (if there is a reponse)
-*/
-String  readWifiSerialMessage(){
-  char value[100]; 
-  int index_count =0;
-  while(wifiSerial.available()>0){
-    value[index_count]=wifiSerial.read();
-    index_count++;
-    value[index_count] = '\0'; // Null terminate the string
-  }
-  String str(value);
-  str.trim();
-  return str;
-}
 
-/*
-* Name: find
-* Description: Function used to match two string
-* Params: 
-* Returns: true if match else false
-*/
-boolean find(String string, String value){
-  if(string.indexOf(value)>=0)
-    return true;
-  return false;
-}
-
-/*
-* Name: sendToWifi
-* Description: Function used to send data to ESP8266.
-* Params: command - the data/command to send; timeout - the time to wait for a response; debug - print to Serial window?(true = yes, false = no)
-* Returns: The response from the esp8266 (if there is a reponse)
-*/
-String sendToWifi(String command, const int timeout, boolean debug){
+String sendToWifi(const char* command, boolean debug){
   if(debug)
   {
     lcd.clear();
@@ -278,108 +249,156 @@ String sendToWifi(String command, const int timeout, boolean debug){
     lcd.print("?");
     lcd.setCursor(0, 1);
   }
-  String response = "";
-  wifiSerial.println(command); // send the read character to the esp8266
-  long int time = millis();
-  while( (time+timeout) > millis())
-  {
-    while(wifiSerial.available())
-    {
-    // The esp has data so display its output to the serial window 
-    char c = wifiSerial.read(); // read the next character.
-    response+=c;
-    }  
-  }
-  if(debug)
-  {
-    lcd.print(response.length() > 0 ? response : "done");
-  }
-  return response;
+  wifiSerial.print(command); // send the read character to the esp8266
+  wifiSerial.print("\r\n");
 }
 
-/*
-* Name: sendData
-* Description: Function used to send string to tcp client using cipsend
-* Params: 
-* Returns: void
-*/
-void sendData(String str){
-  String len="";
-  len+=str.length();
-  sendToWifi("AT+CIPSEND=0,"+len,responseTime,DEBUG);
+char* readFromWifi(char* buffer, const int size, const long int timeout, bool debug) {
+  long int maxTime = millis() + timeout;
+  int index = 0;
+  memset(buffer, 0, size);
+  do {
+    while(index < (size-1) && wifiSerial.available())
+    {
+      buffer[index++] = wifiSerial.read();
+    }
+  } while(index < (size-1) && millis()<maxTime);
+
+  if(debug)
+  {    
+    lcd.print(index < 12 ? buffer : buffer + index - 12);
+  }
+  return buffer;
+}
+
+void sendData(const char* str) {
+  char cmd[32] = {0};
+  snprintf(cmd, 32, "AT+CIPSEND=0,%d", strlen(str));  
+  sendToWifi(cmd, WIFI_DEBUG);
+  delay(200);
+  sendToWifi(str, WIFI_DEBUG);
+}
+
+void closeConnection() {
   delay(100);
-  sendToWifi(str,responseTime,DEBUG);
-  delay(100);
-  sendToWifi("AT+CIPCLOSE=5",responseTime,DEBUG);
+  sendToWifi("AT+CIPCLOSE=5", WIFI_DEBUG);
 }
 
 void getIp() {
-  moduleIp = sendToWifi("AT+CIFSR",responseTime,DEBUG); // get ip address 
+  sendToWifi("AT+CIFSR", WIFI_DEBUG); // get ip address
+  char response[100] = {0};
+  readFromWifi(response, 100, WIFI_TIMEOUT, WIFI_DEBUG);  
+
+  char* ip = strstr(response, "\"");
+  if(ip != NULL ) {
+    char* nextQuote = strstr(ip + 1, "\"");
+    if(nextQuote != NULL) {
+      nextQuote[0] = '\0';
+    }
+  }
+
   lcd.setCursor(0, 1);
-  lcd.print(moduleIp);
+  lcd.print("IP:");
+  lcd.print(ip + 1);
 }
 
 void getStatus() {
-  sendToWifi("AT+CIPSTATUS",responseTime,DEBUG); // get status
+  sendToWifi("AT+CIPSTATUS", WIFI_DEBUG);
+  char response[100] = {0};
+  readFromWifi(response, 100, WIFI_TIMEOUT, WIFI_DEBUG);  
+  lcd.setCursor(0, 1);
+  lcd.print("Status:");
+  lcd.print(response);
 }
 
 void initWifi() {
-  wifiSerial.begin(115200);
+  wifiSerial.begin(WIFI_BAUDRATE);
+  wifiSerial.setTimeout(WIFI_TIMEOUT);
   while (!wifiSerial) {
     lcd.print("#");
     delay(500); // wait for serial port to connect. Needed for Leonardo only
   }
 
-  sendToWifi("AT+CIOBAUD=115200",responseTime,DEBUG);
-  //delay(5000);
-  sendToWifi("AT",responseTime,DEBUG);
-  delay(5000);
-  sendToWifi("AT+CIOBAUD?",responseTime,DEBUG);
-  delay(5000);
-  sendToWifi("AT+CWMODE=2",responseTime,DEBUG); // configure as access point
-  delay(5000);
-  sendToWifi("AT+CIPMUX=1",responseTime,DEBUG); // configure for multiple connections
-  delay(5000);
-  sendToWifi("AT+CIPSERVER=1,80",responseTime,DEBUG); // turn on server on port 80
-  delay(5000);
+char response[100] = {0};
+#if 1
+  sendToWifi("AT+RST", WIFI_DEBUG);
+  readFromWifi(response, 100, WIFI_TIMEOUT, WIFI_DEBUG); 
+  delay(2000);
+
+  sendToWifi("AT+CWJAP=\"Freebox-32C639\",\"hcxwrq64fsqn59bnq6k96d\"", WIFI_DEBUG);
+  readFromWifi(response, 100, 10000, WIFI_DEBUG);
+  delay(2000);
+  if(strstr(response, "ERROR")!=NULL){
+    return;
+  }
+
+  sendToWifi("AT+CWMODE=1", WIFI_DEBUG); // configure as access point
+  readFromWifi(response, 100, WIFI_TIMEOUT, WIFI_DEBUG);
+#else
+  sendToWifi("AT+CWMODE=2", WIFI_DEBUG); // configure as access point
+  readFromWifi(response, 100, WIFI_TIMEOUT, WIFI_DEBUG);
+#endif
+  if(strstr(response, "ERROR")!=NULL){
+    return;
+  }
   getIp();
-  //getStatus();
+  
+  sendToWifi("AT+CIPMUX=1", WIFI_DEBUG); // configure for multiple connections
+  readFromWifi(response, 100, WIFI_TIMEOUT, WIFI_DEBUG);
+  delay(100);
+
+  sendToWifi("AT+CIPSERVER=1,80", WIFI_DEBUG); // turn on server on port 80
+  readFromWifi(response, 100, WIFI_TIMEOUT, WIFI_DEBUG);
+  delay(100);
+
+  //delay(5000);
+  getIp();
 }
 
-void parseAndExecuteConnection(String message) {
-  String ssidAndPass = message.substring(5,message.length());
-  String response = sendToWifi("AT+CWJAP=" + ssidAndPass,responseTime,DEBUG);
-  delay(1000);
-  getIp();
+void parseAndExecuteConnection(const char* ssidAndPass, char* response, const int maxLength) {
+  char cmd[100] = {0};
+  snprintf(cmd, 100, "AT+CWJAP=%s", ssidAndPass);
+  sendToWifi(cmd, WIFI_DEBUG);
+  readFromWifi(response, 100, WIFI_TIMEOUT, WIFI_DEBUG);
+  sendData(response);
 }
 
 void executeWifiCommand() {
   if(wifiSerial.available() <= 0) {
     return;
   }
+  char buffer[100] = {0};
+  readFromWifi(buffer, 100, WIFI_TIMEOUT, WIFI_DEBUG);
   
-  String message = readWifiSerialMessage();
-  
-  if(find(message,"esp8266:")){
-      String result = sendToWifi(message.substring(8,message.length()),responseTime,DEBUG);
-    if(find(result,"OK"))
-      sendData("\n"+result);
-    else
-      sendData("\nErrRead");               //At command ERROR CODE for Failed Executing statement
-  }else
-  if(find(message,"HELLO")){  //receives HELLO from wifi
-      sendData("\\nHI!");    //arduino says HI
-  }else if(find(message,"CONN:")){
-    //sending ph level:
-    parseAndExecuteConnection(message);
+  char response[100] = {0};
+  char* value;
+  if((value = strstr(buffer, "esp8266:")) != NULL) {
+    sendToWifi(value + 8, WIFI_DEBUG);
+    readFromWifi(response, 100, WIFI_TIMEOUT, WIFI_DEBUG);
+    char* result = strstr(response, "OK");
+    if(result != NULL) {
+      sendData("\n");
+      sendData(response);
+    }
+    else {
+      sendData("\n-------\n");
+      sendData(result);
+      sendData("\n-------\n");
+    }
   }
-  else{
-    sendData("\nErrRead");                 //Command ERROR CODE for UNABLE TO READ
+  else if((value = strstr(buffer, "CONN:")) != NULL)
+  {
+    parseAndExecuteConnection(value + 5, response, 100);
+  }
+  else
+  {
+    if(WIFI_DEBUG) {
+      //lcd.setCursor(0, 1);
+      lcd.print("Ukn cmd");
+    }
   }
 }
 
 void handleWifiConfiguration() {
   executeWifiCommand();
 }
-
-
